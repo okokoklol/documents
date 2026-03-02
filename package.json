@@ -1,0 +1,21 @@
+{
+  "name": "@ok.lol/documents",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "exports": {
+    ".": "./index.ts",
+    "./bun-sqlite": "./bun-sqlite.ts",
+    "./bun-directory": "./bun-directory.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "ai": "^6.0.105",
+    "zod": "^4.3.6"
+  }
+}
