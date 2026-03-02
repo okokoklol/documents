@@ -1,15 +1,33 @@
 {
   "name": "@ok.lol/documents",
-  "module": "index.ts",
+  "version": "0.1.0",
   "type": "module",
-  "private": true,
+  "homepage": "https://github.com/okokoklol/documents",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/okokoklol/documents.git"
+  },
+  "files": ["dist"],
   "exports": {
-    ".": "./index.ts",
-    "./bun-sqlite": "./bun-sqlite.ts",
-    "./bun-directory": "./bun-directory.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./bun-sqlite": {
+      "types": "./dist/bun-sqlite.d.ts",
+      "import": "./dist/bun-sqlite.js"
+    },
+    "./bun-directory": {
+      "types": "./dist/bun-directory.d.ts",
+      "import": "./dist/bun-directory.js"
+    }
+  },
+  "scripts": {
+    "build": "bunup"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "bunup": "^0.16.31"
   },
   "peerDependencies": {
     "typescript": "^5"
