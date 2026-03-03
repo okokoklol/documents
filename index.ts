@@ -128,76 +128,83 @@ export class DocumentOps {
 
   /**
    * Assembles a system prompt by prepending optional instructions, then injecting
-   * documents: first any always-inject paths, then search-ranked docs from the
-   * last user/assistant messages. Respects a total character budget and per-document
-   * truncation. Uses {@link read} and {@link search}.
+   * documents: first any always-inject glob matches, then search-ranked docs from
+   * the last user/assistant messages. Filters out never-inject glob matches.
+   * Respects a total character budget and per-document truncation.
+   * Uses {@link glob}, {@link read}, and {@link search}.
    */
   async getSystemPrompt(params: {
-    /** Base system prompt to prepend. */
-    instructions?: string;
-    /** Document paths (case-insensitive) to always inject before ranked results. */
+    /** Glob patterns for documents to always inject before ranked results. */
     alwaysInject?: string[];
     /** Max characters for the entire returned prompt. Default: 24,000. */
     budget?: number;
     /** Max characters per document before truncation. Default: 20,000. */
     budgetPerDocument?: number;
+    /** Base system prompt to prepend. */
+    instructions?: string;
     /** Conversation messages used to determine relevance for search. */
     messages: ModelMessage[];
+    /** Glob patterns for documents to never inject. */
+    neverInject?: string[];
   }): Promise<string> {
-    // Total character budget for the assembled prompt
     const budget = params.budget ?? 24_000;
-    // Max characters per document before truncation
     const perDoc = params.budgetPerDocument ?? 20_000;
-    // Output segments (instructions, then optional <documents> block)
     const parts: string[] = [];
-    // Characters left within the total budget after each step
     let remaining = budget;
 
-    // Prepend optional base instructions
     if (params.instructions) {
-      // Add instructions as first segment
       parts.push(params.instructions);
-      // Consume budget
       remaining -= params.instructions.length;
+    }
+
+    // Resolve neverInject globs to excluded path set
+    const excluded = new Set<string>();
+    if (params.neverInject?.length) {
+      for (const pattern of params.neverInject) {
+        for (const path of await this.glob({ pattern })) excluded.add(path.toLowerCase());
+      }
     }
 
     // Documents to inject, in order: always-inject first, then search-ranked
     const docs: { content: string; path: string; score: number; truncated: boolean }[] = [];
 
-    // Always-inject: read each path and add to docs until budget is exhausted
+    // Resolve alwaysInject globs, deduplicate, filter excluded, then read
     if (params.alwaysInject?.length) {
-      for (const path of params.alwaysInject) {
-        // Stop when budget exhausted
+      const seen = new Set<string>();
+      const paths: string[] = [];
+      for (const pattern of params.alwaysInject) {
+        for (const path of await this.glob({ pattern })) {
+          const key = path.toLowerCase();
+          if (seen.has(key) || excluded.has(key)) continue;
+          seen.add(key);
+          paths.push(path);
+        }
+      }
+
+      for (const path of paths) {
         if (remaining <= 0) break;
         try {
-          // Read document at path
           const { content } = await this.read({ path });
-          // Truncate to fit per-doc and remaining budget
           const doc = systemPromptTruncate({ content, path, score: 1 }, Math.min(perDoc, remaining));
           docs.push(doc);
-          // Consume budget
           remaining -= doc.content.length;
         } catch {
-          // Path missing or unreadable; skip
+          // Unreadable; skip
         }
       }
     }
 
-    // Search for relevant docs using text from the latest user + assistant messages
-    // Natural-language query derived from the most recent user and assistant messages
+    // Search-ranked docs from recent messages
     const query = systemPromptExtractQuery(params.messages);
     if (query && remaining > 0) {
-      // Paths already in docs (always-inject), so we don't add them again from search
       const injectedPaths = new Set(docs.map((d) => d.path.toLowerCase()));
-      // Search results deduped by path (first occurrence kept)
       const matches = systemPromptDedupe(await this.search({ query }));
 
       for (const match of matches) {
         if (remaining <= 0) break;
-        if (injectedPaths.has(match.path.toLowerCase())) continue;
-        // Read full content for this match
+        const key = match.path.toLowerCase();
+        if (injectedPaths.has(key) || excluded.has(key)) continue;
         const { content } = await this.read({ path: match.path });
-        // Truncate to fit per-doc and remaining budget
         const doc = systemPromptTruncate(
           { content, path: match.path, score: match.score },
           Math.min(perDoc, remaining),
@@ -207,18 +214,14 @@ export class DocumentOps {
       }
     }
 
-    // Wrap docs in <documents> XML and append to parts
     if (docs.length) {
-      // One <document> element per doc, with path, score, and optional truncated attr
       const items = docs.map(
         (d) =>
           `<document path="${d.path}" score="${d.score.toFixed(2)}"${d.truncated ? " truncated" : ""}>\n${d.content}\n</document>`,
       );
-      // Append <documents> block to output
       parts.push(`<documents>\n${items.join("\n")}\n</documents>`);
     }
 
-    // Join instructions and optional <documents> block with double newlines
     return parts.join("\n\n");
   }
 

@@ -87,10 +87,11 @@ Assembles a system prompt for the current conversation, injecting relevant docum
 ```typescript
 const systemPrompt = await docs.getSystemPrompt({
   instructions: "This is the base system prompt", // Base system prompt to extend with relevant documents
-  alwaysInject: ["SOUL.MD"],                      // Case-insensitive paths to documents to always inject before any documents relevant to the conversation
+  alwaysInject: ["SOUL.MD"],                      // Glob patterns for documents to always inject before search-ranked results
   budget: 24_000,                                 // Maximum characters for the returned system prompt, including injected documents
   budgetPerDocument: 20_000,                      // Maximum characters to include per document before truncation, inclusive of the truncation message `[… ${truncatedChars} chars truncated]`
   messages: [],                                   // Conversation messages – type: ModelMessage[]
+  neverInject: ["*.secret", "private/**"],        // Glob patterns for documents to never inject
 });
 ```
 

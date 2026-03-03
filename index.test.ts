@@ -24,13 +24,19 @@ function mockEmbeddingModel() {
   });
 }
 
-/** Minimal DocumentOps with controllable read/search for testing getSystemPrompt. */
+/** Minimal DocumentOps with controllable read/glob/search for testing getSystemPrompt. */
 class StubDocumentOps extends DocumentOps {
   constructor(
     private docs: Map<string, string>,
     private searchResults: { content: string; path: string; score: number }[] = [],
   ) {
     super();
+  }
+
+  override async glob({ pattern }: { pattern: string }) {
+    const effective = pattern.startsWith("**/") ? pattern : `**/${pattern}`;
+    const g = new Bun.Glob(effective);
+    return [...this.docs.keys()].filter((p) => g.match(p));
   }
 
   override async read({ path }: { path: string }) {
@@ -183,13 +189,61 @@ describe("getSystemPrompt", () => {
     expect(result).toContain("<documents>");
   });
 
-  test("skips missing always-inject paths", async () => {
+  test("skips unmatched always-inject globs", async () => {
     const ops = new StubDocumentOps(new Map());
     const result = await ops.getSystemPrompt({
       alwaysInject: ["missing.md"],
       messages: [],
     });
     expect(result).not.toContain("<documents>");
+  });
+
+  test("alwaysInject resolves globs", async () => {
+    const ops = new StubDocumentOps(new Map([
+      ["docs/a.md", "Alpha"],
+      ["docs/b.md", "Beta"],
+      ["src/c.ts", "Gamma"],
+    ]));
+    const result = await ops.getSystemPrompt({
+      alwaysInject: ["*.md"],
+      messages: [],
+    });
+    expect(result).toContain("docs/a.md");
+    expect(result).toContain("docs/b.md");
+    expect(result).not.toContain("src/c.ts");
+  });
+
+  test("neverInject excludes from always-inject", async () => {
+    const ops = new StubDocumentOps(new Map([
+      ["guide.md", "The guide"],
+      ["secret.md", "Secret stuff"],
+    ]));
+    const result = await ops.getSystemPrompt({
+      alwaysInject: ["*.md"],
+      neverInject: ["secret.md"],
+      messages: [],
+    });
+    expect(result).toContain("guide.md");
+    expect(result).not.toContain("secret.md");
+  });
+
+  test("neverInject excludes from search results", async () => {
+    const ops = new StubDocumentOps(
+      new Map([
+        ["public.md", "Public content"],
+        ["secret.md", "Secret content"],
+      ]),
+      [
+        { content: "Public content", path: "public.md", score: 0.9 },
+        { content: "Secret content", path: "secret.md", score: 0.8 },
+      ],
+    );
+    const result = await ops.getSystemPrompt({
+      neverInject: ["secret.md"],
+      messages: [{ role: "user", content: "find something" }],
+    });
+    expect(result).toContain("public.md");
+    expect(result).not.toContain("secret.md");
   });
 
   test("includes search results from user messages", async () => {
